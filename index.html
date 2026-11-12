@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ISS Pass Predictor · London</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/5.0.0/satellite.min.js"></script>
+<style>
+  :root{--bg:#04060f;--panel:rgba(14,20,40,0.6);--line:rgba(110,150,230,0.18);--ink:#e7ecfb;--muted:#8893bc;--faint:#586187;
+    --iss:#54e0c0;--lon:#ffb454;--track:#54d6ff;--vis:#5be08a;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(900px 600px at 80% 0,rgba(84,224,192,0.08),transparent 60%)}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 22px 60px}
+  h1{font-weight:600;font-size:24px}h1 b{color:var(--iss)}
+  header p{color:var(--muted);font-size:13px;margin:4px 0 18px}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .layout{display:grid;grid-template-columns:1fr 330px;gap:20px;align-items:start}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}}
+  .stage{background:#02040c;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  canvas{display:block;width:100%}
+  .live{display:flex;gap:18px;flex-wrap:wrap;padding:13px 16px;background:var(--panel);border-top:1px solid var(--line);font-family:'IBM Plex Mono';font-size:13px}
+  .live .it{display:flex;flex-direction:column}.live .it .l{font-size:10px;color:var(--faint);letter-spacing:1px;text-transform:uppercase}
+  .live .it .v{color:var(--ink);font-size:15px;margin-top:2px}
+  .live .it .v.g{color:var(--iss)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;backdrop-filter:blur(10px)}
+  .panel h2{font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:var(--faint);margin-bottom:14px;font-weight:600}
+  .pass{background:#0b1124;border:1px solid var(--line);border-radius:11px;padding:13px;margin-bottom:11px}
+  .pass .when{font-size:15px;font-weight:600}
+  .pass .rel{font-size:12px;color:var(--muted);font-family:'IBM Plex Mono'}
+  .pass .meta{display:flex;gap:14px;margin-top:8px;font-size:12px;color:var(--muted);font-family:'IBM Plex Mono';flex-wrap:wrap}
+  .pass .meta b{color:var(--ink)}
+  .pass .vis{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:10px;margin-top:8px;font-weight:600;letter-spacing:0.5px}
+  .pass .vis.y{background:rgba(91,224,138,0.15);color:var(--vis)}
+  .pass .vis.n{background:rgba(136,147,188,0.12);color:var(--muted)}
+  .loadp{color:var(--faint);font-size:13px;text-align:center;padding:18px;font-style:italic}
+  .obs{font-size:12px;color:var(--muted);margin-bottom:14px;font-family:'IBM Plex Mono'}
+  .obs input{width:90px;background:#0b1124;border:1px solid var(--line);border-radius:7px;color:var(--ink);padding:6px;font-family:inherit;text-align:center}
+  .hint{font-size:11.5px;color:var(--faint);line-height:1.5;margin-top:10px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:10px}
+  .legend i{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ISS <b>Pass Predictor</b></h1>
+    <p>Live position &amp; ground track of the International Space Station, plus the next visible passes over your location. Position from <span class="mono">wheretheiss.at</span>; passes propagated locally from the current TLE.</p>
+  </header>
+  <div class="layout">
+    <div>
+      <div class="stage">
+        <canvas id="map"></canvas>
+        <div class="live" id="live"><div class="loadp">Locating the ISS…</div></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--iss)"></i>ISS now</span>
+        <span><i style="background:var(--track)"></i>ground track</span>
+        <span><i style="background:var(--lon)"></i>you</span>
+        <span style="color:var(--faint)">shaded = night side</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Next Passes</h2>
+      <div class="obs">Observer — lat <input id="lat" type="number" value="51.5074" step="0.01"> lon <input id="lon" type="number" value="-0.1278" step="0.01"> <span style="color:var(--faint)">(London)</span></div>
+      <div id="passes"><div class="loadp">Computing passes…</div></div>
+      <div class="hint">A pass = the ISS rising above 10° elevation. <span style="color:var(--vis)">Visible</span> means it's dark where you are and the station is likely sunlit — the only time you can actually see it. Re-enter coordinates and they'll recompute.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const map=document.getElementById("map"),ctx=map.getContext("2d");
+  let W=0,H=0,DPR=devicePixelRatio||1;
+  let iss=null, track=[], tle=null, obs={lat:51.5074,lon:-0.1278};
+
+  function resize(){const w=map.clientWidth;W=w;H=Math.round(w*0.5);map.style.height=H+"px";
+    map.width=W*DPR;map.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);draw();}
+  const X=lon=>(lon+180)/360*W, Y=lat=>(90-lat)/180*H;
+
+  // crude subsolar point for day/night terminator
+  function subsolar(d){
+    const N=(d.getUTCMonth()*30.4+d.getUTCDate());const decl=-23.44*Math.cos((2*Math.PI/365)*(N+10))*Math.PI/180;
+    const secs=d.getUTCHours()*3600+d.getUTCMinutes()*60+d.getUTCSeconds();
+    const lon=180-(secs/86400)*360;return{lat:decl*180/Math.PI,lon};}
+
+  function draw(){
+    ctx.fillStyle="#040814";ctx.fillRect(0,0,W,H);
+    // night shading
+    const ss=subsolar(new Date());const slat=ss.lat*Math.PI/180,slon=ss.lon*Math.PI/180;
+    for(let px=0;px<W;px+=4)for(let py=0;py<H;py+=4){
+      const lon=(px/W*360-180)*Math.PI/180, lat=(90-py/H*180)*Math.PI/180;
+      const cosz=Math.sin(lat)*Math.sin(slat)+Math.cos(lat)*Math.cos(slat)*Math.cos(lon-slon);
+      if(cosz<0){ctx.fillStyle="rgba(2,5,14,0.55)";ctx.fillRect(px,py,4,4);}
+    }
+    // grid
+    ctx.strokeStyle="rgba(110,150,230,0.13)";ctx.lineWidth=1;
+    for(let lon=-180;lon<=180;lon+=30){ctx.beginPath();ctx.moveTo(X(lon),0);ctx.lineTo(X(lon),H);ctx.stroke();}
+    for(let lat=-60;lat<=60;lat+=30){ctx.beginPath();ctx.moveTo(0,Y(lat));ctx.lineTo(W,Y(lat));ctx.stroke();}
+    ctx.strokeStyle="rgba(110,150,230,0.25)";ctx.beginPath();ctx.moveTo(0,Y(0));ctx.lineTo(W,Y(0));ctx.stroke();
+    // track
+    if(track.length>1){ctx.strokeStyle="rgba(84,214,255,0.6)";ctx.lineWidth=1.8;ctx.beginPath();
+      let prev=null;track.forEach(p=>{const x=X(p.lon),y=Y(p.lat);
+        if(prev&&Math.abs(x-prev)>W/2){ctx.stroke();ctx.beginPath();ctx.moveTo(x,y);}else if(prev===null){ctx.moveTo(x,y);}else ctx.lineTo(x,y);prev=x;});
+      ctx.stroke();}
+    // observer
+    ctx.fillStyle="#ffb454";ctx.beginPath();ctx.arc(X(obs.lon),Y(obs.lat),5,0,7);ctx.fill();
+    ctx.strokeStyle="rgba(255,180,84,0.4)";ctx.lineWidth=2;ctx.beginPath();ctx.arc(X(obs.lon),Y(obs.lat),10,0,7);ctx.stroke();
+    // ISS
+    if(iss){const x=X(iss.lon),y=Y(iss.lat);
+      ctx.fillStyle="rgba(84,224,192,0.25)";ctx.beginPath();ctx.arc(x,y,13,0,7);ctx.fill();
+      ctx.fillStyle="#54e0c0";ctx.beginPath();ctx.arc(x,y,6,0,7);ctx.fill();
+      ctx.strokeStyle="#fff";ctx.lineWidth=1.5;ctx.stroke();
+      ctx.fillStyle="#54e0c0";ctx.font="11px IBM Plex Mono";ctx.fillText("ISS",x+10,y+4);}
+  }
+
+  async function fetchPos(){
+    try{const r=await fetch("https://api.wheretheiss.at/v1/satellites/25544");const d=await r.json();
+      iss={lat:d.latitude,lon:d.longitude,alt:d.altitude,vel:d.velocity};
+      track.push({lat:iss.lat,lon:iss.lon});if(track.length>240)track.shift();
+      renderLive();draw();
+    }catch(e){document.getElementById("live").innerHTML='<div class="loadp">Couldn\'t reach the ISS position service (offline?).</div>';}
+  }
+  function renderLive(){
+    document.getElementById("live").innerHTML=
+      `<div class="it"><span class="l">latitude</span><span class="v g">${iss.lat.toFixed(2)}°</span></div>`+
+      `<div class="it"><span class="l">longitude</span><span class="v g">${iss.lon.toFixed(2)}°</span></div>`+
+      `<div class="it"><span class="l">altitude</span><span class="v">${iss.alt.toFixed(0)} km</span></div>`+
+      `<div class="it"><span class="l">speed</span><span class="v">${iss.vel.toFixed(0)} km/h</span></div>`+
+      `<div class="it"><span class="l">updated</span><span class="v">${new Date().toLocaleTimeString()}</span></div>`;
+  }
+
+  // ---------- passes via satellite.js ----------
+  const FALLBACK=["1 25544U 98067A   24196.51782528  .00016717  00000-0  30774-3 0  9993",
+                  "2 25544  51.6402 247.4627 0009230 130.5360 325.0288 15.49925102461258"];
+  async function getTLE(){
+    try{const r=await fetch("https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE");
+      const t=(await r.text()).trim().split("\n").map(s=>s.trim());
+      if(t.length>=3&&t[1].startsWith("1 "))return[t[1],t[2]];
+      if(t.length>=2&&t[0].startsWith("1 "))return[t[0],t[1]];
+      throw 0;
+    }catch(e){return FALLBACK;}
+  }
+  function sunElev(date,lat,lon){ // rough solar elevation in degrees
+    const ss=subsolar(date);const la=lat*Math.PI/180,lo=lon*Math.PI/180,sla=ss.lat*Math.PI/180,slo=ss.lon*Math.PI/180;
+    const cosz=Math.sin(la)*Math.sin(sla)+Math.cos(la)*Math.cos(sla)*Math.cos(lo-slo);
+    return Math.asin(Math.max(-1,Math.min(1,cosz)))*180/Math.PI;
+  }
+  async function computePasses(){
+    if(typeof satellite==="undefined"){document.getElementById("passes").innerHTML='<div class="loadp">Orbital library didn\'t load — live map still works.</div>';return;}
+    tle=tle||await getTLE();
+    const rec=satellite.twoline2satrec(tle[0],tle[1]);
+    const gd={latitude:satellite.degreesToRadians(obs.lat),longitude:satellite.degreesToRadians(obs.lon),height:0.03};
+    const passes=[];let inPass=false,cur=null;
+    const now=new Date();
+    for(let s=0;s<48*3600;s+=20){
+      const t=new Date(now.getTime()+s*1000);
+      const pv=satellite.propagate(rec,t);if(!pv.position)continue;
+      const gmst=satellite.gstime(t);
+      const look=satellite.ecfToLookAngles(gd,satellite.eciToEcf(pv.position,gmst));
+      const el=satellite.radiansToDegrees(look.elevation);
+      if(el>10&&!inPass){inPass=true;cur={start:t,maxEl:el,maxAz:satellite.radiansToDegrees(look.azimuth)};}
+      else if(el>10&&inPass){if(el>cur.maxEl){cur.maxEl=el;cur.maxAz=satellite.radiansToDegrees(look.azimuth);}}
+      else if(el<=10&&inPass){inPass=false;cur.end=t;cur.dur=(cur.end-cur.start)/1000;
+        cur.visible=sunElev(cur.start,obs.lat,obs.lon)<-6; passes.push(cur);if(passes.length>=6)break;}
+    }
+    renderPasses(passes);
+  }
+  function dirName(az){const dirs=["N","NE","E","SE","S","SW","W","NW"];return dirs[Math.round(az/45)%8];}
+  function renderPasses(passes){
+    const el=document.getElementById("passes");
+    if(!passes.length){el.innerHTML='<div class="loadp">No passes above 10° in the next 48h from here.</div>';return;}
+    const now=Date.now();
+    el.innerHTML=passes.map(p=>{
+      const hrs=(p.start-now)/3600000;
+      const rel=hrs<1?Math.round(hrs*60)+" min":hrs<24?hrs.toFixed(1)+" h":(hrs/24).toFixed(1)+" days";
+      return `<div class="pass"><div class="when">${p.start.toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit'})}</div>`+
+        `<div class="rel">in ${rel}</div>`+
+        `<div class="meta"><span>max <b>${p.maxEl.toFixed(0)}°</b></span><span>dur <b>${Math.round(p.dur/60)}m ${Math.round(p.dur%60)}s</b></span><span>toward <b>${dirName(p.maxAz)}</b></span></div>`+
+        `<div class="vis ${p.visible?"y":"n"}">${p.visible?"★ likely visible (dark sky)":"daylight — not visible"}</div></div>`;
+    }).join("");
+  }
+
+  document.getElementById("lat").onchange=recompute;
+  document.getElementById("lon").onchange=recompute;
+  function recompute(){obs.lat=+document.getElementById("lat").value;obs.lon=+document.getElementById("lon").value;
+    document.getElementById("passes").innerHTML='<div class="loadp">Recomputing…</div>';draw();computePasses();}
+
+  addEventListener("resize",resize);
+  resize();fetchPos();computePasses();
+  setInterval(fetchPos,5000);
+  setInterval(()=>computePasses(),5*60*1000);
+})();
+</script>
+</body>
+</html>
